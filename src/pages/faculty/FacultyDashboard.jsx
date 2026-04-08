@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../api/api';
 import socketService from '../../lib/socket';
@@ -13,7 +14,6 @@ export default function FacultyDashboard() {
   const [duration, setDuration] = useState(10);
   
   const [session, setSession] = useState(null);
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [attendance, setAttendance] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -23,9 +23,30 @@ export default function FacultyDashboard() {
   
   const [pastSessions, setPastSessions] = useState([]);
 
+  const isSessionActive = (sessionToCheck) => {
+    if (!sessionToCheck?.sessionCode || !sessionToCheck?.expiresAt) return false;
+    return sessionToCheck.status === 'active' && new Date(sessionToCheck.expiresAt) > new Date();
+  };
+
+  const currentQrValue = isSessionActive(session)
+    ? JSON.stringify({ sessionCode: session.sessionCode })
+    : '';
+
   const pushToast = (message) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setToasts((currentToasts) => [...currentToasts, { id, message }]);
+  };
+
+  const openSession = (selectedSession) => {
+    setSession(selectedSession);
+    setIsQrExpanded(false);
+    setAttendance([]);
+    fetchAttendance(selectedSession._id);
+
+    const socket = socketService.getSocket();
+    if (socket) {
+      socket.emit('session:join', { sessionId: selectedSession._id });
+    }
   };
 
   const fetchPastSessions = async () => {
@@ -43,6 +64,23 @@ export default function FacultyDashboard() {
   useEffect(() => {
     fetchPastSessions();
   }, []);
+
+  useEffect(() => {
+    if (session || pastSessions.length === 0) return;
+
+    const activeSession = pastSessions.find((pastSession) => isSessionActive(pastSession));
+    if (activeSession) {
+      setSession(activeSession);
+      setIsQrExpanded(false);
+      setAttendance([]);
+      fetchAttendance(activeSession._id);
+
+      const socket = socketService.getSocket();
+      if (socket) {
+        socket.emit('session:join', { sessionId: activeSession._id });
+      }
+    }
+  }, [pastSessions, session]);
 
   // Join faculty room as soon as the socket is ready so backend can target us
   useEffect(() => {
@@ -149,18 +187,8 @@ export default function FacultyDashboard() {
 
       if (res.data.success) {
         const newSession = res.data.session;
-        setSession(newSession);
-        setQrCodeDataUrl(res.data.qrCodeDataUrl);
-        setAttendance([]); // reset
-        fetchAttendance(newSession._id); // initial fetch
-
+        openSession(newSession);
         fetchPastSessions(); // update the list
-
-        // Join the specific session room so we receive events via that channel too
-        const socket = socketService.getSocket();
-        if (socket) {
-          socket.emit('session:join', { sessionId: newSession._id });
-        }
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create session');
@@ -170,11 +198,7 @@ export default function FacultyDashboard() {
   };
 
   const handleViewSession = (pastSession) => {
-    setSession(pastSession);
-    setQrCodeDataUrl(''); // Or regenerate if needed, but best not to show QR for old sessions
-    setIsQrExpanded(false);
-    setAttendance([]);
-    fetchAttendance(pastSession._id);
+    openSession(pastSession);
   };
 
   const handleDeleteSession = async (sessionToDelete) => {
@@ -197,7 +221,6 @@ export default function FacultyDashboard() {
 
         if (session?._id === sessionToDelete._id) {
           setSession(null);
-          setQrCodeDataUrl('');
           setIsQrExpanded(false);
           setAttendance([]);
         }
@@ -227,7 +250,7 @@ export default function FacultyDashboard() {
         ))}
       </div>
 
-      {isQrExpanded && qrCodeDataUrl && (
+      {isQrExpanded && currentQrValue && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-md">
           <div className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-slate-700 bg-slate-900 shadow-2xl ring-1 ring-slate-700/50">
             <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/80 px-5 py-3">
@@ -247,10 +270,12 @@ export default function FacultyDashboard() {
             </div>
 
             <div className="flex min-h-[70vh] items-center justify-center bg-slate-100 p-6 sm:p-10">
-              <img
-                src={qrCodeDataUrl}
-                alt="Expanded attendance QR code"
-                className="h-auto max-h-[60vh] w-full max-w-[560px] object-contain"
+              <QRCodeSVG
+                value={currentQrValue}
+                size={560}
+                level="M"
+                includeMargin
+                className="h-auto max-h-[60vh] w-full max-w-[560px]"
               />
             </div>
           </div>
@@ -412,7 +437,7 @@ export default function FacultyDashboard() {
             <div className="grid gap-6 md:grid-cols-2">
               <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/50 p-8 shadow-xl backdrop-blur-sm text-center">
                 
-                {qrCodeDataUrl ? (
+                {currentQrValue ? (
                   <>
                     <div className="mb-2 flex w-full items-center justify-between gap-3">
                       <h3 className="text-xl font-bold text-white">Scan to Attend</h3>
@@ -428,7 +453,13 @@ export default function FacultyDashboard() {
                     <p className="mb-6 text-sm text-slate-400">Instruct students to scan this code.</p>
                     
                     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-                      <img src={qrCodeDataUrl} alt="Attendance QR Code" className="h-48 w-48 object-contain" />
+                      <QRCodeSVG
+                        value={currentQrValue}
+                        size={192}
+                        level="M"
+                        includeMargin
+                        className="h-48 w-48"
+                      />
                     </div>
                   </>
                 ) : (
