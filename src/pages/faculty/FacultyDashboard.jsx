@@ -19,8 +19,14 @@ export default function FacultyDashboard() {
   const [error, setError] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState(null);
   const [isQrExpanded, setIsQrExpanded] = useState(false);
+  const [toasts, setToasts] = useState([]);
   
   const [pastSessions, setPastSessions] = useState([]);
+
+  const pushToast = (message) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts((currentToasts) => [...currentToasts, { id, message }]);
+  };
 
   const fetchPastSessions = async () => {
     try {
@@ -61,11 +67,40 @@ export default function FacultyDashboard() {
     const socket = socketService.getSocket();
     if (!socket || !session) return;
 
-    const handleAttendanceMarked = (data) => {
-      // Re-fetch full attendance with student name + enrollment details
-      if (data.sessionId === session._id) {
-        fetchAttendance(session._id);
-      }
+    const handleAttendanceMarked = (event) => {
+      if (event.sessionId !== session._id || !event.attendance) return;
+
+      setAttendance((currentAttendance) => {
+        const alreadyExists = currentAttendance.some(
+          (record) => record._id === event.attendance._id || record.studentId?._id === event.attendance.studentId?._id
+        );
+
+        if (alreadyExists) {
+          return currentAttendance.map((record) =>
+            record._id === event.attendance._id || record.studentId?._id === event.attendance.studentId?._id
+              ? event.attendance
+              : record
+          );
+        }
+
+        return [event.attendance, ...currentAttendance];
+      });
+
+      setPastSessions((currentSessions) =>
+        currentSessions.map((pastSession) =>
+          pastSession._id === event.sessionId
+            ? {
+                ...pastSession,
+                attendanceCount: Math.max(
+                  pastSession.attendanceCount || 0,
+                  (event.attendanceCount ?? (pastSession.attendanceCount || 0) + 1)
+                ),
+              }
+            : pastSession
+        )
+      );
+
+      pushToast(event.message || `${event.attendance.studentId?.name || 'Student'} attendance has been marked`);
     };
 
     socket.on('attendance:marked', handleAttendanceMarked);
@@ -74,6 +109,20 @@ export default function FacultyDashboard() {
       socket.off('attendance:marked', handleAttendanceMarked);
     };
   }, [session]);
+
+  useEffect(() => {
+    if (toasts.length === 0) return undefined;
+
+    const timers = toasts.map((toast) =>
+      window.setTimeout(() => {
+        setToasts((currentToasts) => currentToasts.filter((item) => item.id !== toast.id));
+      }, 3200)
+    );
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [toasts]);
 
   const fetchAttendance = async (sessionId) => {
     try {
@@ -162,6 +211,22 @@ export default function FacultyDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 p-6">
+      <div className="fixed right-4 top-4 z-50 flex w-full max-w-sm flex-col gap-3">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className="rounded-2xl border border-emerald-500/20 bg-slate-900/95 px-4 py-3 text-sm text-slate-100 shadow-2xl ring-1 ring-emerald-500/10 backdrop-blur-md"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-full bg-emerald-500/15 p-1 text-emerald-400">
+                <CheckCircle className="h-4 w-4" />
+              </div>
+              <p className="leading-5">{toast.message}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {isQrExpanded && qrCodeDataUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-md">
           <div className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-slate-700 bg-slate-900 shadow-2xl ring-1 ring-slate-700/50">
