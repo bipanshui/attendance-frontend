@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../api/api';
 import socketService from '../../lib/socket';
-import { LogOut, Play, Users, CheckCircle, Clock } from 'lucide-react';
+import { LogOut, Play, Users, CheckCircle, Clock, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export default function FacultyDashboard() {
@@ -17,6 +17,7 @@ export default function FacultyDashboard() {
   const [attendance, setAttendance] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [deletingSessionId, setDeletingSessionId] = useState(null);
   
   const [pastSessions, setPastSessions] = useState([]);
 
@@ -123,6 +124,37 @@ export default function FacultyDashboard() {
     setQrCodeDataUrl(''); // Or regenerate if needed, but best not to show QR for old sessions
     setAttendance([]);
     fetchAttendance(pastSession._id);
+  };
+
+  const handleDeleteSession = async (sessionToDelete) => {
+    const confirmed = window.confirm(
+      `Delete the session for ${sessionToDelete.course} - ${sessionToDelete.subject}? This will also remove its attendance records.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingSessionId(sessionToDelete._id);
+    setError('');
+
+    try {
+      const res = await api.delete(`/faculty/session/${sessionToDelete._id}`);
+
+      if (res.data.success) {
+        setPastSessions((currentSessions) =>
+          currentSessions.filter((pastSession) => pastSession._id !== sessionToDelete._id)
+        );
+
+        if (session?._id === sessionToDelete._id) {
+          setSession(null);
+          setQrCodeDataUrl('');
+          setAttendance([]);
+        }
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete session');
+    } finally {
+      setDeletingSessionId(null);
+    }
   };
 
   return (
@@ -249,6 +281,24 @@ export default function FacultyDashboard() {
                             {ps.attendanceCount} records
                           </span>
                         </div>
+                      </div>
+
+                      <div className="mt-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteSession(ps);
+                          }}
+                          disabled={deletingSessionId === ps._id}
+                          className={cn(
+                            "inline-flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/20",
+                            deletingSessionId === ps._id && "cursor-not-allowed opacity-70"
+                          )}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {deletingSessionId === ps._id ? 'Deleting...' : 'Delete'}
+                        </button>
                       </div>
                     </div>
                   );

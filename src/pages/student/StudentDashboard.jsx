@@ -1,10 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../api/api';
-import { Html5QrcodeScanner } from 'html5-qrcode';
-import { useEffect } from 'react';
+import { Html5Qrcode } from 'html5-qrcode';
 import { LogOut, QrCode, CheckCircle, Keyboard, AlertCircle } from 'lucide-react';
-import { cn } from '../../lib/utils';
 
 export default function StudentDashboard() {
   const { user, logout } = useAuth();
@@ -14,6 +12,8 @@ export default function StudentDashboard() {
   const [errorMsg, setErrorMsg] = useState('');
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const scannerRef = useRef(null);
+  const hasSubmittedScanRef = useRef(false);
 
   const fetchHistory = async () => {
     try {
@@ -32,55 +32,7 @@ export default function StudentDashboard() {
     fetchHistory();
   }, []);
 
-  useEffect(() => {
-    let scanner = null;
-
-    if (status === 'scanning') {
-      // Configuration for scanner
-      scanner = new Html5QrcodeScanner("reader", { 
-        fps: 10, 
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1
-      }, false);
-
-      scanner.render(
-        (decodedText) => {
-          // Attempt to parse JSON payload {"sessionCode":"..."} from backend
-          try {
-            const data = JSON.parse(decodedText);
-            if (data.sessionCode) {
-              setSessionCode(data.sessionCode);
-              scanner.clear(); // Stop scanning on success
-            } else {
-              throw new Error("Invalid QR code format");
-            }
-          } catch (e) {
-            // Fallback just in case they used raw text
-            setSessionCode(decodedText);
-            scanner.clear();
-          }
-        },
-        (error) => {
-          // ignore scan noise
-        }
-      );
-    }
-
-    return () => {
-      if (scanner) {
-        scanner.clear().catch(e => console.error(e));
-      }
-    };
-  }, [status]);
-
-  // Handle API submission when code is acquired
-  useEffect(() => {
-    if (sessionCode) {
-      submitAttendance(sessionCode);
-    }
-  }, [sessionCode]);
-
-  const submitAttendance = async (code) => {
+  const submitAttendance = useCallback(async (code) => {
     setStatus('submitting');
     setErrorMsg('');
     try {
@@ -93,7 +45,114 @@ export default function StudentDashboard() {
       setErrorMsg(err.response?.data?.message || 'Failed to mark attendance');
       setStatus('error');
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const stopScanner = async () => {
+      if (!scannerRef.current) return;
+
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+      } catch (err) {
+        console.error('Failed to stop scanner', err);
+      } finally {
+        try {
+          await scannerRef.current.clear();
+        } catch (err) {
+          console.error('Failed to clear scanner', err);
+        }
+        scannerRef.current = null;
+      }
+    };
+
+    const startScanner = async () => {
+      if (typeof window === 'undefined') return;
+
+      if (
+        window.location.protocol !== 'https:' &&
+        window.location.hostname !== 'localhost' &&
+        window.location.hostname !== '127.0.0.1'
+      ) {
+        setErrorMsg('Camera scanning requires HTTPS on mobile devices.');
+        setStatus('error');
+        return;
+      }
+
+      try {
+        const scanner = new Html5Qrcode('reader');
+        scannerRef.current = scanner;
+        hasSubmittedScanRef.current = false;
+
+        const cameras = await Html5Qrcode.getCameras();
+        const rearCamera = cameras.find((camera) =>
+          /back|rear|environment/iu.test(camera.label)
+        );
+
+        const cameraConfig = rearCamera
+          ? { deviceId: { exact: rearCamera.id } }
+          : { facingMode: 'environment' };
+
+        await scanner.start(
+          cameraConfig,
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1,
+          },
+          async (decodedText) => {
+            if (hasSubmittedScanRef.current) return;
+
+            hasSubmittedScanRef.current = true;
+            let parsedCode = decodedText;
+
+            try {
+              const data = JSON.parse(decodedText);
+              if (data.sessionCode) {
+                parsedCode = data.sessionCode;
+              }
+            } catch {
+              parsedCode = decodedText;
+            }
+
+            try {
+              await stopScanner();
+            } finally {
+              setSessionCode(parsedCode);
+            }
+          },
+          () => {
+            // Ignore normal frame decode failures while scanning.
+          }
+        );
+      } catch (err) {
+        console.error('Failed to start scanner', err);
+        const message = /permission|notallowed|denied/iu.test(err?.message || '')
+          ? 'Camera permission was denied. Please allow camera access and try again.'
+          : 'Unable to access the camera. Use HTTPS on mobile and make sure another app is not using the camera.';
+        setErrorMsg(message);
+        setStatus('error');
+      }
+    };
+
+    if (status === 'scanning') {
+      startScanner();
+    } else {
+      stopScanner();
+    }
+
+    return () => {
+      stopScanner();
+    };
+  }, [status]);
+
+  // Handle API submission when code is acquired
+  useEffect(() => {
+    if (sessionCode) {
+      submitAttendance(sessionCode);
+    }
+  }, [sessionCode, submitAttendance]);
 
   const handleManualSubmit = (e) => {
     e.preventDefault();
@@ -103,6 +162,7 @@ export default function StudentDashboard() {
   };
 
   const resetScanner = () => {
+    hasSubmittedScanRef.current = false;
     setSessionCode('');
     setManualCode('');
     setErrorMsg('');
@@ -187,8 +247,11 @@ export default function StudentDashboard() {
                         <h3 className="font-semibold text-white">Scan QR Code</h3>
                         <button onClick={() => setStatus('idle')} className="text-xs text-slate-400 hover:text-white">Cancel</button>
                     </div>
+                    <p className="mb-3 text-xs text-slate-400">
+                      On mobile, allow camera access and point the rear camera at the QR code.
+                    </p>
                     {/* The QR Reader Container div */}
-                    <div id="reader" className="w-full !rounded-xl overflow-hidden [&>*]:!border-0 bg-slate-950"></div>
+                    <div id="reader" className="min-h-72 w-full overflow-hidden rounded-xl border border-slate-800 bg-slate-950"></div>
                 </div>
             )}
 
@@ -264,14 +327,25 @@ export default function StudentDashboard() {
         </div>
       </div>
     
-      {/* Dirty styling overrides for html5-qrcode standard messy UI overlaying standard text and buttons */}
+      {/* Styling overrides for html5-qrcode's injected markup */}
       <style dangerouslySetInnerHTML={{__html: `
         #reader { border: 1px solid #1e293b !important; }
+        #reader video { width: 100% !important; border-radius: 0.75rem; object-fit: cover; }
+        #reader section { background: transparent !important; color: #cbd5e1 !important; }
+        #reader__scan_region { min-height: 18rem; background: #020617 !important; }
+        #reader__scan_region img { display: none !important; }
         #reader img[alt="Info icon"] { display: none !important; }
-        #reader__dashboard_section_csr span { color: #94a3b8 !important; font-family: Inter, sans-serif; }
-        #reader__dashboard_section_swaplink { color: #6366f1 !important; text-decoration: none; }
-        #html5-qrcode-button-camera-permission { background-color: #6366f1 !important; color: white !important; border: none; border-radius: 0.5rem; padding: 0.5rem 1rem; font-family: Inter; cursor: pointer; margin-top: 1rem; }
-        #html5-qrcode-button-camera-stop { background-color: #ef4444 !important; color: white !important; border: none; border-radius: 0.5rem; padding: 0.5rem 1rem; font-family: Inter; cursor: pointer; margin-top: 1rem; }
+        #reader__dashboard { padding: 0.75rem 0 0 !important; }
+        #reader__dashboard_section_csr span { color: #94a3b8 !important; font-family: inherit; }
+        #reader__dashboard_section_swaplink { color: #38bdf8 !important; text-decoration: none; }
+        #reader button,
+        #reader select {
+          border-radius: 0.75rem !important;
+          border: 1px solid #334155 !important;
+          background: #0f172a !important;
+          color: white !important;
+          padding: 0.625rem 0.875rem !important;
+        }
       `}} />
     </div>
   );
