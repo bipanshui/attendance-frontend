@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../api/api';
 import socketService from '../../lib/socket';
-import { LogOut, Play, Users, CheckCircle, Clock, Trash2 } from 'lucide-react';
+import { LogOut, Play, Users, CheckCircle, Clock, Trash2, Expand, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export default function FacultyDashboard() {
@@ -18,6 +18,7 @@ export default function FacultyDashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState(null);
+  const [isQrExpanded, setIsQrExpanded] = useState(false);
   
   const [pastSessions, setPastSessions] = useState([]);
 
@@ -122,6 +123,7 @@ export default function FacultyDashboard() {
   const handleViewSession = (pastSession) => {
     setSession(pastSession);
     setQrCodeDataUrl(''); // Or regenerate if needed, but best not to show QR for old sessions
+    setIsQrExpanded(false);
     setAttendance([]);
     fetchAttendance(pastSession._id);
   };
@@ -147,6 +149,7 @@ export default function FacultyDashboard() {
         if (session?._id === sessionToDelete._id) {
           setSession(null);
           setQrCodeDataUrl('');
+          setIsQrExpanded(false);
           setAttendance([]);
         }
       }
@@ -159,6 +162,36 @@ export default function FacultyDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 p-6">
+      {isQrExpanded && qrCodeDataUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-md">
+          <div className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-slate-700 bg-slate-900 shadow-2xl ring-1 ring-slate-700/50">
+            <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/80 px-5 py-3">
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-red-400"></span>
+                <span className="h-3 w-3 rounded-full bg-amber-400"></span>
+                <span className="h-3 w-3 rounded-full bg-emerald-400"></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsQrExpanded(false)}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+                Close
+              </button>
+            </div>
+
+            <div className="flex min-h-[70vh] items-center justify-center bg-slate-100 p-6 sm:p-10">
+              <img
+                src={qrCodeDataUrl}
+                alt="Expanded attendance QR code"
+                className="h-auto max-h-[60vh] w-full max-w-[560px] object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="mb-8 flex items-center justify-between rounded-2xl bg-slate-900/80 p-4 shadow-lg ring-1 ring-slate-800 backdrop-blur-md">
         <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-500/20 text-primary-500">
@@ -316,7 +349,17 @@ export default function FacultyDashboard() {
                 
                 {qrCodeDataUrl ? (
                   <>
-                    <h3 className="mb-2 text-xl font-bold text-white">Scan to Attend</h3>
+                    <div className="mb-2 flex w-full items-center justify-between gap-3">
+                      <h3 className="text-xl font-bold text-white">Scan to Attend</h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsQrExpanded(true)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-700 hover:text-white"
+                      >
+                        <Expand className="h-4 w-4" />
+                        Maximize
+                      </button>
+                    </div>
                     <p className="mb-6 text-sm text-slate-400">Instruct students to scan this code.</p>
                     
                     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
