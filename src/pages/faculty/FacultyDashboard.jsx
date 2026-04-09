@@ -20,6 +20,7 @@ export default function FacultyDashboard() {
   const [deletingSessionId, setDeletingSessionId] = useState(null);
   const [isQrExpanded, setIsQrExpanded] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(null);
   
   const [pastSessions, setPastSessions] = useState([]);
 
@@ -81,6 +82,36 @@ export default function FacultyDashboard() {
       }
     }
   }, [pastSessions, session]);
+
+  useEffect(() => {
+    if (!session || !isSessionActive(session)) {
+      setTimeLeft(null);
+      return;
+    }
+
+    const calculateTimeLeft = () => {
+      const now = new Date();
+      const expires = new Date(session.expiresAt);
+      const diff = expires - now;
+      if (diff <= 0) return null;
+      return {
+        total: diff,
+        minutes: Math.floor((diff / 1000 / 60) % 60),
+        seconds: Math.floor((diff / 1000) % 60),
+      };
+    };
+
+    setTimeLeft(calculateTimeLeft());
+    const timer = setInterval(() => {
+      const remaining = calculateTimeLeft();
+      setTimeLeft(remaining);
+      if (!remaining) {
+        clearInterval(timer);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [session]);
 
   // Join faculty room as soon as the socket is ready so backend can target us
   useEffect(() => {
@@ -270,13 +301,23 @@ export default function FacultyDashboard() {
             </div>
 
             <div className="flex min-h-[70vh] items-center justify-center bg-slate-100 p-6 sm:p-10">
-              <QRCodeSVG
-                value={currentQrValue}
-                size={560}
-                level="M"
-                includeMargin
-                className="h-auto max-h-[60vh] w-full max-w-[560px]"
-              />
+              <div className="text-center">
+                {timeLeft && (
+                  <div className="mb-6 rounded-lg bg-amber-500/10 border border-amber-500/20 px-6 py-3 inline-block">
+                    <p className="text-xs text-amber-600 font-medium uppercase tracking-wider mb-1">Time Remaining</p>
+                    <p className="text-4xl font-bold text-amber-600 font-mono">
+                      {String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}
+                    </p>
+                  </div>
+                )}
+                <QRCodeSVG
+                  value={currentQrValue}
+                  size={560}
+                  level="M"
+                  includeMargin
+                  className="h-auto max-h-[60vh] w-full max-w-[560px]"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -450,6 +491,16 @@ export default function FacultyDashboard() {
                         Maximize
                       </button>
                     </div>
+                    
+                    {timeLeft && (
+                      <div className="mb-4 rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-2">
+                        <p className="text-xs text-amber-400 font-medium uppercase tracking-wider mb-1">Time Remaining</p>
+                        <p className="text-2xl font-bold text-amber-400 font-mono">
+                          {String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}
+                        </p>
+                      </div>
+                    )}
+                    
                     <p className="mb-6 text-sm text-slate-400">Instruct students to scan this code.</p>
                     
                     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
